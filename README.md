@@ -4,6 +4,9 @@
 
 <h1 align="center">Yuiju</h1>
 
+> [!WARNING]
+> 项目计划进行大规模重构，当前版本暂不建议使用。
+
 <p align="center">
   <strong>让角色拥有自己的生活</strong>
 </p>
