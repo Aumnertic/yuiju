@@ -106,12 +106,12 @@ export class OneBotConnection {
           return;
         }
         await onMessage(session.channelId!, message);
-        logger.debug("QQ 群事件已接收", {
+        logger.info("QQ 群事件已接收", {
           characterId: this.characterId,
           channelId: session.channelId,
           senderId: message.senderId,
           kind: message.kind,
-          ...(message.kind === "message" && { messageId: message.id }),
+          ...(message.kind === "message" && { messageId: message.id, content: message.content }),
         });
       } catch (error) {
         logger.error("角色群聊接入失败", {
