@@ -150,7 +150,8 @@ export class OneBotConnection {
     if (target.senderId) {
       elements.push(h.at(target.senderId));
     }
-    elements.push(h.text(text));
+    const textElement = h.text(target.senderId ? ` ${text}` : text);
+    elements.push(textElement);
 
     // 使用平台返回的 ID 和时间记录发送事实，不在请求前生成占位消息。
     const sent = await this.bot.createMessage(channelId, elements, channelId);
@@ -164,7 +165,7 @@ export class OneBotConnection {
       senderName: this.characterName,
       timestamp: message.timestamp!,
       isSelf: true,
-      content: [...(target.senderId ? [h.at(target.senderId)] : []), h.text(text)].join(""),
+      content: [...(target.senderId ? [h.at(target.senderId)] : []), textElement].join(""),
       ...(target.quoteMessageId && { quote: { id: target.quoteMessageId } }),
       ...(target.senderId && { mentionedSenderId: target.senderId }),
     }));

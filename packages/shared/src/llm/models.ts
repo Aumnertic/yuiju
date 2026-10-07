@@ -1,4 +1,5 @@
-import type { LanguageModelMiddleware, wrapLanguageModel } from "ai";
+import { randomUUID } from "node:crypto";
+import { APICallError, type LanguageModelMiddleware, type wrapLanguageModel } from "ai";
 import { load_config } from "../config/load";
 import { logger } from "../logger/logger";
 import {
@@ -22,6 +23,7 @@ type SharedModel = Model & {
 };
 type Candidate = {
   providerKey: string;
+  host: string;
   model: Model;
   supportsStructuredOutputs: boolean;
   inputModalities?: string[];
@@ -57,6 +59,7 @@ function createModel(
       return createModel(name, getCandidates, nextFallback);
     },
     async doGenerate(params) {
+      const requestId = randomUUID();
       const available = sortProvidersByCooldown(
         selectCandidates(await getCandidates(), params).filter(
           (candidate) =>
@@ -66,33 +69,74 @@ function createModel(
             fallback,
         ),
       );
-      if (!available.length) throw new Error(`${name} 没有满足本次输入与输出能力要求的供应商`);
+      if (!available.length) {
+        throw new Error(`${name} 没有满足本次输入与输出能力要求的供应商`);
+      }
       for (const [index, candidate] of available.entries()) {
         params.abortSignal?.throwIfAborted();
+        // 每个供应商请求独立计时；工具执行不计时，生活决策沿用原有策略。
+        const providerTimeout =
+          name === "chat" || name === "flash" ? AbortSignal.timeout(60_000) : undefined;
+        // 把信号交给 SDK 的底层 fetch，超时会终止响应正文读取，而非仅停止等待。
+        const abortSignal = AbortSignal.any(
+          [params.abortSignal, providerTimeout].filter(
+            (signal): signal is AbortSignal => signal !== undefined,
+          ),
+        );
+        const requestParams = { ...params, abortSignal };
+        const startedAt = Date.now();
+        const logContext = {
+          requestId,
+          group: name,
+          provider: candidate.model.provider,
+          host: candidate.host,
+          model: candidate.model.modelId,
+          attempt: index + 1,
+        };
+        logger.info("模型请求开始", logContext);
         try {
+          let result: Awaited<ReturnType<Model["doGenerate"]>>;
           if (
             params.responseFormat?.type === "json" &&
             params.responseFormat.schema &&
             !candidate.supportsStructuredOutputs &&
             fallback
           ) {
-            return await fallback({
+            result = await fallback({
               model: candidate.model,
-              params,
-              doGenerate: () => candidate.model.doGenerate(params),
-              doStream: () => candidate.model.doStream(params),
+              params: requestParams,
+              doGenerate: () => candidate.model.doGenerate(requestParams),
+              doStream: () => candidate.model.doStream(requestParams),
             });
+          } else {
+            result = await candidate.model.doGenerate(requestParams);
           }
-          return await candidate.model.doGenerate(params);
+          abortSignal.throwIfAborted();
+          logger.info("模型请求完成", { ...logContext, durationMs: Date.now() - startedAt });
+          return result;
         } catch (error) {
-          if (!canSwitchProvider(error, params.abortSignal)) throw error;
-          markProviderFailed(candidate.providerKey);
-          if (index === available.length - 1)
-            throw new Error(`${name} 所有供应商请求失败`, { cause: error });
-          logger.warn("模型请求失败，切换供应商", {
-            group: name,
-            provider: candidate.model.provider,
+          // 用户/业务主动取消不能触发供应商切换。
+          if (params.abortSignal?.aborted) {
+            logger.info("模型请求已取消", { ...logContext, durationMs: Date.now() - startedAt });
+            throw params.abortSignal.reason;
+          }
+          const timedOut = providerTimeout?.aborted === true;
+          const retryable = timedOut || canSwitchProvider(error, params.abortSignal);
+          const willSwitch = retryable && index < available.length - 1;
+          logger.warn(timedOut ? "供应商请求超过 60 秒" : "模型请求失败", {
+            ...logContext,
+            durationMs: Date.now() - startedAt,
+            willSwitch,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            ...(APICallError.isInstance(error) && { statusCode: error.statusCode }),
           });
+          if (!retryable) {
+            throw error;
+          }
+          markProviderFailed(candidate.providerKey);
+          if (!willSwitch) {
+            throw new Error(`${name} 所有供应商请求失败`, { cause: error });
+          }
         }
       }
       throw new Error(`${name} 没有可用供应商`);
@@ -190,6 +234,7 @@ function createGroupModel(name: ModelName, inputModalities: readonly InputModali
         )
         .map(({ source, index }) => ({
           providerKey: `${name}:${index}`,
+          host: new URL(source.base_url).host,
           model: createProvider(source, `${name}${index}`).chatModel(source.model),
           supportsStructuredOutputs: source.supports_structured_outputs === true,
           inputModalities: source.input_modalities,
