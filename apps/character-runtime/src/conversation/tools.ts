@@ -278,16 +278,20 @@ export function createPlannerTools(
           )) {
             // 先保存本次工具确认的结果，落库失败也不能抹去发送事实。
             sent.push(...events);
+            for (const event of events) {
+              if (event.kind === "message") {
+                logger.info("QQ 群回复已发送", {
+                  ...scope,
+                  messageId: event.id,
+                  content: event.content,
+                  quoteMessageId: event.quote?.id,
+                  mentionedSenderId: event.mentionedSenderId,
+                });
+              }
+            }
             stage = "storage";
             await context.recordSent(events);
             stage = "send";
-          }
-          if (sent.length) {
-            logger.info("QQ 群回复已发送", {
-              characterId: scope.characterId,
-              channelId: scope.channelId,
-              sentCount: sent.length,
-            });
           }
         } catch (error) {
           context.failed = true;
@@ -326,13 +330,13 @@ export function createPlannerTools(
           context.sendAttempted = true;
           const event = await context.connection.poke(scope.channelId, senderId);
           sent.push(event);
-          stage = "storage";
-          await context.recordSent([event]);
           logger.info("QQ 群戳一戳已发送", {
             characterId: scope.characterId,
             channelId: scope.channelId,
             senderId,
           });
+          stage = "storage";
+          await context.recordSent([event]);
         } catch (error) {
           context.failed = true;
           logger.error("戳一戳工具执行失败", { ...scope, stage, sentCount: sent.length, error });

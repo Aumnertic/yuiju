@@ -46,9 +46,21 @@ export function attachWorldWebSocket(server: Server, world: World, queues: World
         const signal = AbortSignal.any([subscription.signal, AbortSignal.timeout(30_000)]);
         const acknowledged = once(subscription.acknowledgements, job.id!, { signal });
         send(subscription.socket, { type: "event", deliveryId: job.id!, event: job.data });
+        logger.info("世界通知已发出，等待确认", {
+          characterId,
+          deliveryId: job.id,
+          eventId: job.data.eventId,
+          type: job.data.type,
+          attempt: job.attemptsMade + 1,
+        });
         logger.silly("e2e.notification.sent", { characterId, jobId: job.id, event: job.data });
         // 仅当前任务等 ACK，其他任务继续发送；超时、断线由 BullMQ 延迟重试。
         await acknowledged;
+        logger.info("世界通知已确认接收", {
+          characterId,
+          deliveryId: job.id,
+          eventId: job.data.eventId,
+        });
         logger.silly("e2e.notification.acknowledged", {
           characterId,
           jobId: job.id,
@@ -132,6 +144,7 @@ export function attachWorldWebSocket(server: Server, world: World, queues: World
           acknowledgements: new EventEmitter().setMaxListeners(0),
         });
         send(socket, { type: "ready", current: current.value });
+        logger.info("角色已订阅世界事件", { characterId, eventTypes: message.eventTypes });
       }
     } catch (error) {
       if (!signal.aborted) {
@@ -148,6 +161,7 @@ export function attachWorldWebSocket(server: Server, world: World, queues: World
       socket.close();
       if (characterId !== undefined) {
         subscriptions.delete(characterId);
+        logger.info("角色世界订阅已断开", { characterId });
       }
     }
   }

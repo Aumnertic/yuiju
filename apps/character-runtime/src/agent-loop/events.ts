@@ -28,7 +28,7 @@ export async function receiveCharacterEvent(
   event: CharacterEvent,
 ): Promise<void> {
   const key = characterKey(characterId);
-  await (await getRedis()).eval(
+  const inserted = await (await getRedis()).eval(
     `
 if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
@@ -41,6 +41,9 @@ return 1
     event.id,
     JSON.stringify(event),
   );
+  if (inserted === 1) {
+    logger.info("主 agent 事件已入队", { characterId, event });
+  }
   logger.silly("e2e.event.received", { characterId, event });
 }
 
@@ -180,5 +183,13 @@ return redis.call('HSETNX', KEYS[2], ARGV[3], ARGV[4])
     JSON.stringify(event),
   );
   logger.silly("e2e.activity.due.checked", { characterId, event, inserted: result === 1 });
+  if (result === 1) {
+    logger.warn("活动超时检查已触发", {
+      characterId,
+      eventId: event.id,
+      activityId: waiting.activityId,
+      endsAt: waiting.endsAt,
+    });
+  }
   return result === 1;
 }

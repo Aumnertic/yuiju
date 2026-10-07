@@ -78,6 +78,8 @@ export class WorldClient {
     requestId: string,
   ): Promise<WorldResult<ExecuteActionResult>> {
     const config = await load_config();
+    const startedAt = Date.now();
+    logger.info("向世界请求行动", { characterId: this.characterId, requestId, ...input });
     logger.silly("e2e.world.action.request", { characterId: this.characterId, requestId, input });
     const response = await fetch(new URL("/actions", config.app!.world_simulator!.base_url!), {
       method: "POST",
@@ -86,6 +88,12 @@ export class WorldClient {
       signal: AbortSignal.any([this.stopping.signal, AbortSignal.timeout(15_000)]),
     });
     const result = (await response.json()) as WorldResult<ExecuteActionResult>;
+    logger.info("世界行动请求返回", {
+      characterId: this.characterId,
+      requestId,
+      durationMs: Date.now() - startedAt,
+      result,
+    });
     logger.silly("e2e.world.action.response", { characterId: this.characterId, requestId, result });
     return result;
   }
@@ -138,6 +146,14 @@ export class WorldClient {
             await finishWorldActivityWait(this.characterId, message.event.activity.activityId);
           }
           await this.storeEvent(message.deliveryId, message.event);
+          logger.info("角色已接收世界通知", {
+            characterId: this.characterId,
+            deliveryId: message.deliveryId,
+            eventId: message.event.eventId,
+            type: message.event.type,
+            description: message.event.description,
+            activity: message.event.activity,
+          });
           logger.silly("e2e.world.event.saved", {
             characterId: this.characterId,
             deliveryId: message.deliveryId,

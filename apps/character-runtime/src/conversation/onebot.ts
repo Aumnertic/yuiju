@@ -105,7 +105,6 @@ export class OneBotConnection {
         if (message.kind === "poke" && message.targetSenderId !== this.config.self_id) {
           return;
         }
-        await onMessage(session.channelId!, message);
         logger.info("QQ 群事件已接收", {
           characterId: this.characterId,
           channelId: session.channelId,
@@ -113,6 +112,7 @@ export class OneBotConnection {
           kind: message.kind,
           ...(message.kind === "message" && { messageId: message.id, content: message.content }),
         });
+        await onMessage(session.channelId!, message);
       } catch (error) {
         logger.error("角色群聊接入失败", {
           characterId: this.characterId,

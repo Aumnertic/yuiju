@@ -68,6 +68,11 @@ export class ConversationContext {
           `${this.options.stage} 上下文达到 ${blockingRatio * 100}%，没有可压缩的旧交互`,
         );
       }
+      logger.info("上下文达到阈值，等待压缩", {
+        ...this.options.scope,
+        stage: this.options.stage,
+        blockingRatio,
+      });
       await this.task;
       if (!this.completed) {
         throw new Error(
@@ -149,6 +154,12 @@ export class ConversationContext {
       }
 
       // 保留原工具定义以复用请求前缀，但压缩请求不能执行工具。
+      logger.info("聊天上下文开始压缩", {
+        ...scope,
+        stage,
+        unitCount: units.length,
+        coveredThrough: units.at(-1)!.sequence,
+      });
       const result = await generateText({
         model,
         tools,
@@ -170,13 +181,13 @@ export class ConversationContext {
         throw new Error("摘要未缩短上下文，保留原历史");
       }
       this.completed = { text, coveredThrough: units.at(-1)!.sequence };
-      logger.debug("聊天上下文压缩完成", {
+      logger.info("聊天上下文压缩完成", {
         characterId: scope.characterId,
         channelId: scope.channelId,
         stage,
         durationMs: Date.now() - startedAt,
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
+        coveredThrough: this.completed.coveredThrough,
+        summaryCharacters: text.length,
       });
     } catch (error) {
       // 原上下文保留，后续有输入时再尝试，不启动后台重试循环。

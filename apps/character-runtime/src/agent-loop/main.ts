@@ -153,6 +153,16 @@ export class MainAgentLoop {
           state.round = { id: randomUUID(), ...batch };
           await saveAgentState(characterId, state);
         }
+        const startedAt = Date.now();
+        logger.info("主 agent 开始处理事件", {
+          characterId,
+          roundId: state.round.id,
+          recovering,
+          events: state.round.events.map((event) => ({
+            id: event.id,
+            type: event.type === "world" ? event.event.type : event.type,
+          })),
+        });
         logger.silly("e2e.agent.round.start", {
           characterId,
           roundId: state.round.id,
@@ -161,6 +171,11 @@ export class MainAgentLoop {
         });
         await this.runRound(state, recovering);
         await finishAgentRound(characterId, state);
+        logger.info("主 agent 本轮完成并保存", {
+          characterId,
+          roundId: state.round.id,
+          durationMs: Date.now() - startedAt,
+        });
         logger.silly("e2e.agent.round.committed", { characterId, roundId: state.round.id });
         // 再读一次，接住本轮执行期间保存的新事件。
         this.wakeRequested = true;
@@ -196,8 +211,20 @@ export class MainAgentLoop {
       for (const [index, action] of actions.entries()) {
         this.stopping.signal.throwIfAborted();
         if (action.result === undefined) {
+          logger.info("主 agent 恢复未确认操作", {
+            characterId,
+            roundId: round.id,
+            requestId: action.id,
+            tool: action.name,
+          });
           action.result = await executeAgentAction(this.execution, action, true);
           await saveAgentAction(characterId, round.id, index, action);
+          logger.info("主 agent 恢复操作已保存", {
+            characterId,
+            roundId: round.id,
+            requestId: action.id,
+            result: action.result.slice(0, 500),
+          });
         }
       }
       // 不恢复丢失的思考过程；先提供实际操作记录，模型按需查询现状再继续决策。
@@ -240,10 +267,59 @@ export class MainAgentLoop {
           agentToolDescription,
           this.windowTokens,
           signal,
+          characterId,
         );
         return { messages: agentMessages(state.context, this.instructions) };
       },
+      onStepStart: ({ callId, stepNumber, modelId }) => {
+        logger.info("主 agent 请求模型", {
+          characterId,
+          roundId: round.id,
+          callId,
+          step: stepNumber + 1,
+          modelId,
+        });
+      },
+      onToolExecutionStart: ({ toolCall }) => {
+        const input = JSON.stringify(toolCall.input);
+        logger.info("主 agent 调用工具", {
+          characterId,
+          roundId: round.id,
+          toolCallId: toolCall.toolCallId,
+          tool: toolCall.toolName,
+          input: input.length > 500 ? `${input.slice(0, 500)}…（已省略）` : input,
+        });
+        logger.debug("主 agent 工具完整入参", { characterId, roundId: round.id, toolCall });
+      },
+      onToolExecutionEnd: ({ toolCall, toolOutput, toolExecutionMs }) => {
+        if (toolOutput.type === "tool-error") {
+          logger.error("主 agent 工具执行异常", {
+            characterId,
+            roundId: round.id,
+            toolCallId: toolCall.toolCallId,
+            tool: toolCall.toolName,
+            durationMs: toolExecutionMs,
+            error: toolOutput.error,
+          });
+          return;
+        }
+        // 返回字符串也可能描述业务失败；只记录返回事实，不将其标成执行成功。
+        const output =
+          typeof toolOutput.output === "string"
+            ? toolOutput.output
+            : JSON.stringify(toolOutput.output);
+        logger.info("主 agent 工具返回", {
+          characterId,
+          roundId: round.id,
+          toolCallId: toolCall.toolCallId,
+          tool: toolCall.toolName,
+          durationMs: toolExecutionMs,
+          result: output.length > 500 ? `${output.slice(0, 500)}…（已省略）` : output,
+        });
+        logger.debug("主 agent 工具完整结果", { characterId, roundId: round.id, toolOutput });
+      },
       onStepEnd: ({ response, finishReason }) => {
+        logger.info("主 agent 模型步骤结束", { characterId, roundId: round.id, finishReason });
         logger.silly("e2e.agent.step", {
           characterId,
           roundId: round.id,

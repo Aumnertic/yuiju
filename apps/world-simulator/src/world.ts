@@ -78,6 +78,9 @@ export class World {
   /** 恢复状态，补算到期活动，加入新角色后启动循环。 */
   async start(): Promise<void> {
     const savedState = await loadWorldState();
+    logger.info(savedState === null ? "开始创建世界" : "开始恢复世界状态", {
+      characterCount: this.characterDefinitions.size,
+    });
     const now = Date.now();
     if (savedState === null) {
       const period = weatherPeriod(now, this.timezone);
@@ -121,6 +124,14 @@ export class World {
       }
     }
     await this.commitStateAndFacts(draftState, []);
+    logger.info("世界状态已就绪", {
+      weather: draftState.weather,
+      characters: Object.values(draftState.characters).map((character) => ({
+        characterId: character.characterId,
+        placeId: character.placeId,
+        activity: character.currentActivity && activityView(character.currentActivity),
+      })),
+    });
     this.worldLoopTask = this.runWorldLoop();
   }
 
@@ -160,7 +171,9 @@ export class World {
     requestId: string,
     input: ExecuteActionInput,
   ): Promise<WorldResult<ExecuteActionResult>> {
-    return this.enqueueStateChange(async () => {
+    const startedAt = Date.now();
+    logger.info("世界收到行动请求", { characterId, requestId, ...input });
+    const response = await this.enqueueStateChange<WorldResult<ExecuteActionResult>>(async () => {
       await this.restoreAfterFailedCommit();
       const definition = this.characterDefinitions.get(characterId);
       if (!definition || !this.committedState!.characters[characterId]) {
@@ -237,6 +250,13 @@ export class World {
       });
       return { ok: true, value: result };
     });
+    logger.info(response.ok ? "世界行动请求已确认" : "世界行动请求被拒绝", {
+      characterId,
+      requestId,
+      durationMs: Date.now() - startedAt,
+      result: response,
+    });
+    return response;
   }
 
   /** 持续驱动世界推进；一轮结束后等待 1 秒，不叠加 tick。 */
@@ -402,7 +422,20 @@ export class World {
       while (!signal.aborted) {
         try {
           if (randomEventDescription === undefined) {
+            const startedAt = Date.now();
+            logger.info("活动小插曲开始生成", {
+              characterId,
+              activityId: activity.activityId,
+              actionId: activity.actionId,
+              positive,
+            });
             randomEventDescription = await generateRandomEvent(input, signal);
+            logger.info("活动小插曲生成完成", {
+              characterId,
+              activityId: activity.activityId,
+              durationMs: Date.now() - startedAt,
+              description: randomEventDescription,
+            });
           }
 
           await this.enqueueStateChange(async () => {
@@ -455,6 +488,7 @@ export class World {
     receipt?: RequestReceipt,
     notifications: readonly WorldEvent[] = [],
   ): Promise<void> {
+    const previousState = this.committedState;
     try {
       await commitWorldState(
         this.queues,
@@ -468,6 +502,49 @@ export class World {
     } catch (error) {
       this.committedState = null;
       throw error;
+    }
+    // 仅在提交成功后记录业务变化；普通 tick 不输出状态快照。
+    for (const fact of facts) {
+      logger.info("世界事实已提交", {
+        eventId: fact.eventId,
+        type: fact.type,
+        characterId: fact.characterId,
+        occurredAt: fact.occurredAt,
+        placeId: fact.placeId,
+        activity: fact.activity,
+        description: fact.description,
+        notifyCharacters: fact.notifications.map((event) => event.characterId),
+      });
+      if (fact.type === "activity_completed") {
+        const character = draftState.characters[fact.characterId!];
+        logger.info("角色活动结算后状态", {
+          characterId: fact.characterId,
+          eventId: fact.eventId,
+          placeId: character.placeId,
+          stamina: character.stamina,
+          satiety: character.satiety,
+          money: character.money,
+          phoneBattery: character.phoneBattery,
+          inventory: character.inventory,
+        });
+      }
+    }
+    for (const event of notifications) {
+      logger.info("角色空闲提醒已提交", {
+        characterId: event.characterId,
+        eventId: event.eventId,
+        activityId: event.activity?.activityId,
+      });
+    }
+    if (previousState && previousState.resourceDate !== draftState.resourceDate) {
+      logger.info("世界每日资源已刷新", { date: draftState.resourceDate });
+    }
+    if (previousState) {
+      for (const [placeId, place] of Object.entries(draftState.places)) {
+        if (previousState.places[placeId].isOpen !== place.isOpen) {
+          logger.info("地点开放状态已变更", { placeId, isOpen: place.isOpen });
+        }
+      }
     }
   }
 

@@ -40,7 +40,12 @@ export function evaluateTrigger(input: {
     .reverse()
     .find((message) => message.isSelf && message.kind === "message");
   if (input.directed || (latestSelf && now - latestSelf.timestamp <= 15_000)) {
-    return { shouldRun: true, shouldRecheck: false, score: 0 };
+    return {
+      shouldRun: true,
+      shouldRecheck: false,
+      score: 0,
+      reason: input.directed ? "被直接呼叫" : "继续刚才的交流",
+    };
   }
 
   // 内容分：问题、请求、征求意见和较长正文可以叠加；纯短反应统一降为 -25 分。
@@ -108,5 +113,6 @@ export function evaluateTrigger(input: {
     shouldRun: eligible && score >= 80,
     shouldRecheck: pending.length > 0 && (ageBonus < 30 || !eligible),
     score,
+    reason: !eligible ? "沉默冷却中" : score >= 80 ? "触发评分达标" : "触发评分不足",
   };
 }

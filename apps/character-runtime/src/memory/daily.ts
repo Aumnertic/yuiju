@@ -227,6 +227,19 @@ export class DailyMemory {
   }
 
   private async organize(job: DailyMemoryJob, key: string): Promise<void> {
+    const startedAt = Date.now();
+    logger.info("每日记忆整理开始", {
+      characterId: this.characterId,
+      date: job.date,
+      days: job.days.map((day) => ({
+        date: day.date,
+        batches: day.batches.length,
+        sourceCount: day.batches.reduce((count, batch) => count + batch.length, 0),
+      })),
+      stage: job.stage,
+      dayIndex: job.dayIndex,
+      batchIndex: job.batchIndex,
+    });
     const redis = await getRedis();
     const collection = await materialCollection();
     const timezone = (await load_config()).app!.timezone!;
@@ -249,10 +262,26 @@ export class DailyMemory {
       await pruneInactivePeople(this.characterId);
       job.stage = "conversations";
       await redis.set(key, JSON.stringify(job));
+      logger.info("人物活跃统计与清理完成", {
+        characterId: this.characterId,
+        date: job.date,
+        messageCount: messages.length,
+      });
     }
     while (job.dayIndex < job.days.length) {
       this.stopping.signal.throwIfAborted();
       const day = job.days[job.dayIndex];
+      const stage = job.stage;
+      const stageStartedAt = Date.now();
+      logger.info("每日记忆阶段开始", {
+        characterId: this.characterId,
+        date: day.date,
+        stage,
+        ...((stage === "conversations" || stage === "experiences" || stage === "people") && {
+          batch: job.batchIndex + 1,
+          batchCount: day.batches.length,
+        }),
+      });
       if (job.stage === "commit") {
         // 三处持久化不是同一事务；草稿已保存在 Redis，中断后重放写入，不重新生成。
         await saveExperienceMemory(job.draft!.experience);
@@ -261,6 +290,11 @@ export class DailyMemory {
         job.batchIndex = 0;
         job.stage = "people";
         await redis.set(key, JSON.stringify(job));
+        logger.info("经历记忆与自我认知已保存", {
+          characterId: this.characterId,
+          date: day.date,
+          durationMs: Date.now() - stageStartedAt,
+        });
         continue;
       }
       if (job.stage === "release") {
@@ -289,6 +323,7 @@ export class DailyMemory {
         job.stage = "conversations";
         job.draft = null;
         await redis.set(key, JSON.stringify(job));
+        logger.info("当天记忆整理已完成", { characterId: this.characterId, date: day.date });
         continue;
       }
       const sources = day.batches[job.batchIndex];
@@ -334,6 +369,13 @@ export class DailyMemory {
         }
         job.stage = "experiences";
         await redis.set(key, JSON.stringify(job));
+        logger.info("记忆群聊素材压缩完成", {
+          characterId: this.characterId,
+          date: day.date,
+          batch: job.batchIndex + 1,
+          groupCount: groups.size,
+          durationMs: Date.now() - stageStartedAt,
+        });
         continue;
       }
       const batchId = createHash("sha256").update(JSON.stringify(sources)).digest("hex");
@@ -354,6 +396,11 @@ export class DailyMemory {
           previous?.text ?? "",
           this.stopping.signal,
         );
+        logger.info("经历记忆生成完成，开始整理与审查自我认知", {
+          characterId: this.characterId,
+          date: day.date,
+          batch: job.batchIndex + 1,
+        });
         const cognition = await prepareReviewedSelfCognition(
           this.characterId,
           batchId,
@@ -371,7 +418,15 @@ export class DailyMemory {
         job.stage = job.batchIndex === day.batches.length ? "release" : "people";
       }
       await redis.set(key, JSON.stringify(job));
+      logger.info("每日记忆阶段完成", {
+        characterId: this.characterId,
+        date: day.date,
+        stage,
+        sourceCount: sources.length,
+        durationMs: Date.now() - stageStartedAt,
+      });
     }
+    logger.info("开始记忆遗忘整理", { characterId: this.characterId, date: job.date });
     await coarsenExperiences(this.characterId, job.date, this.stopping.signal);
     await forgetPeople(this.characterId, job.date, this.stopping.signal);
     await forgetEndedPlans(this.characterId, Date.now() - 30 * 86_400_000);
@@ -389,6 +444,12 @@ export class DailyMemory {
         throw error;
       }
     }
+    logger.info("每日记忆整理完成", {
+      characterId: this.characterId,
+      date: job.date,
+      dayCount: job.days.length,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   async stop(): Promise<void> {
