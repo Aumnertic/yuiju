@@ -155,6 +155,7 @@ packages/python/__pycache__/
 yuiju.config.json
 /memory/
 /data/
+/apps/character-runtime/evals/output/
 CLAUDE.md
 
 .codex-pet-runs/
