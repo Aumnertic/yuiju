@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "yuiju-world-simulator",
+      name: "yuiju-world",
       script: "pnpm",
       args: "run start:world-simulator",
       cwd: __dirname,
@@ -14,7 +14,7 @@ module.exports = {
       max_memory_restart: "1024M",
     },
     {
-      name: "yuiju-character-runtime",
+      name: "yuiju-char",
       script: "pnpm",
       args: "run start:character-runtime",
       cwd: __dirname,
@@ -27,7 +27,7 @@ module.exports = {
       max_memory_restart: "1024M",
     },
     // {
-    //   name: "yuiju-dashboard",
+    //   name: "yuiju-web",
     //   script: "pnpm",
     //   args: "run start:dashboard",
     //   cwd: __dirname,

@@ -76,7 +76,10 @@ export async function generateStructuredOutput<TOOLS extends ToolSet, OUTPUT ext
           ),
         }),
       });
-      logger.info("JSON 修复请求完成", { usage: repairResult.usage });
+      logger.debug("JSON 修复请求完成", {
+        inputTokens: repairResult.usage.inputTokens,
+        outputTokens: repairResult.usage.outputTokens,
+      });
       const repaired = jsonrepair(repairResult.text);
       return output.parseCompleteOutput(
         { text: repaired },

@@ -145,11 +145,12 @@ export class Planner {
     if (execution.waitSeconds === undefined && result.finishReason !== "stop") {
       throw new Error("Planner 达到调用上限，尚未结束本轮");
     }
-    logger.info("聊天工具循环结束", {
-      ...this.scope,
-      stage: "planner",
+    logger.debug("聊天工具循环结束", {
+      characterId: this.scope.characterId,
+      channelId: this.scope.channelId,
       durationMs: Date.now() - startedAt,
-      usage: result.usage,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
       sendAttempted: execution.sendAttempted,
       failed: execution.failed,
       waitSeconds: execution.waitSeconds,

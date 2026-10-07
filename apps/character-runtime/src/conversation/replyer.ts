@@ -145,15 +145,16 @@ export class Replyer {
       allowSystemInMessages: true,
       maxRetries: 0,
     });
-    logger.info("聊天文字生成完成", {
-      ...this.scope,
-      stage: "replyer",
-      durationMs: Date.now() - startedAt,
-      usage: result.usage,
-    });
     if (result.finishReason !== "stop" || !result.text.trim()) {
       throw new Error(`Replyer 未正常生成文字：${result.finishReason}`);
     }
+    logger.debug("聊天文字生成完成", {
+      characterId: this.scope.characterId,
+      channelId: this.scope.channelId,
+      durationMs: Date.now() - startedAt,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    });
     return result.text.trim();
   }
 

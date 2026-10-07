@@ -170,11 +170,13 @@ export class ConversationContext {
         throw new Error("摘要未缩短上下文，保留原历史");
       }
       this.completed = { text, coveredThrough: units.at(-1)!.sequence };
-      logger.info("聊天上下文压缩完成", {
-        ...scope,
-        stage: `${stage}.compression`,
+      logger.debug("聊天上下文压缩完成", {
+        characterId: scope.characterId,
+        channelId: scope.channelId,
+        stage,
         durationMs: Date.now() - startedAt,
-        usage: result.usage,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
       });
     } catch (error) {
       // 原上下文保留，后续有输入时再尝试，不启动后台重试循环。

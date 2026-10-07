@@ -13,7 +13,7 @@ export async function connectOneBot(
   const context = new Context({});
   context.plugin(HTTP);
   new OneBotBot(context, config);
-  context.on("message", onMessage);
+  context.on("message-created", onMessage);
   if (onNotice) {
     context.on("internal/session", async (session) => {
       if (session.type === "notice") {
@@ -101,11 +101,18 @@ export class OneBotConnection {
 
       try {
         const message =
-          session.type === "message" ? readOneBotMessage(session) : readOneBotPoke(session);
+          session.type === "message-created" ? readOneBotMessage(session) : readOneBotPoke(session);
         if (message.kind === "poke" && message.targetSenderId !== this.config.self_id) {
           return;
         }
         await onMessage(session.channelId!, message);
+        logger.debug("QQ 群事件已接收", {
+          characterId: this.characterId,
+          channelId: session.channelId,
+          senderId: message.senderId,
+          kind: message.kind,
+          ...(message.kind === "message" && { messageId: message.id }),
+        });
       } catch (error) {
         logger.error("角色群聊接入失败", {
           characterId: this.characterId,
@@ -115,8 +122,8 @@ export class OneBotConnection {
       }
     };
 
-    // 原始 notice 只放行戳一戳，receive 因此只会收到 message 或 poke。
-    context.on("message", receive);
+    // Satori 将 message 别名规范化为 message-created；notice 入口只放行戳一戳。
+    context.on("message-created", receive);
     context.on("internal/session", async (session) => {
       if (session.type === "notice" && session.subtype === "poke") {
         await receive(session);

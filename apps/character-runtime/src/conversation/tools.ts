@@ -282,9 +282,16 @@ export function createPlannerTools(
             await context.recordSent(events);
             stage = "send";
           }
+          if (sent.length) {
+            logger.info("QQ 群回复已发送", {
+              characterId: scope.characterId,
+              channelId: scope.channelId,
+              sentCount: sent.length,
+            });
+          }
         } catch (error) {
           context.failed = true;
-          logger.error("回复工具执行失败", { ...scope, stage, error });
+          logger.error("回复工具执行失败", { ...scope, stage, sentCount: sent.length, error });
           switch (stage) {
             case "replyer":
               failure = `回复生成失败，未发送：${error instanceof Error ? error.message : String(error)}`;
@@ -321,9 +328,14 @@ export function createPlannerTools(
           sent.push(event);
           stage = "storage";
           await context.recordSent([event]);
+          logger.info("QQ 群戳一戳已发送", {
+            characterId: scope.characterId,
+            channelId: scope.channelId,
+            senderId,
+          });
         } catch (error) {
           context.failed = true;
-          logger.error("戳一戳工具执行失败", { ...scope, stage, error });
+          logger.error("戳一戳工具执行失败", { ...scope, stage, sentCount: sent.length, error });
           failure =
             stage === "prepare-send"
               ? "发送前状态保存失败，未执行戳一戳。"
@@ -390,12 +402,13 @@ async function understandMedia(
     if (result.finishReason !== "stop" || !result.text.trim()) {
       throw new Error(`未正常生成理解结果：${result.finishReason}`);
     }
-    logger.info("聊天媒体理解完成", {
-      ...scope,
-      stage: "planner.multimodal",
+    logger.debug("聊天媒体理解完成", {
+      characterId: scope.characterId,
+      channelId: scope.channelId,
       mediaCount: media.length,
       durationMs: Date.now() - startedAt,
-      usage: result.usage,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
     });
     return result.text.trim();
   } catch (error) {
